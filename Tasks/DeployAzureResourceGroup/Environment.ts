@@ -6,6 +6,8 @@ import q = require("q");
 import util = require("util");
 import tl = require("vsts-task-lib/task");
 import deployAzureRG = require("./DeployAzureRG");
+import azureUtil = require("./AzureUtil");
+
 class PropertyValue {
     public IsSecure: boolean;
     public Data: string;
@@ -127,17 +129,35 @@ export class RegisterEnvironment {
             return;
         }
         console.log("Registering Environment Variable..");
-        let details = [this.getVMDetails(), this.getNetworkInterfaceDetails(), this.getPublicIPAddresses(), this.getLoadBalancers()];
-        q.all(details).then((result) => {
+        var details = new azureUtil.AzureUtil(this.taskParameters);
+        details.getDetails().then(()=> {
+            this.parseVMDetails(details.vmDetails);
+            this.parseNetworkInterfaceDetails(details.networkInterfaceDetails);
+            this.parseLoadBalancerDetails(details.loadBalancersDetails);
+            this.parsePublicIPDetails(details.publicAddressDetails);
             this.InstantiateEnvironment();
         }).catch((error) => {
-            console.error(error);
             tl.setResult(tl.TaskResult.Failed, error);
         })
     }
     
- 
-
+    private parseLoadBalancerDetails(loadbalancers) {
+        var inboundNatRuleMap = {};
+        for (var i=0; i < loadbalancers.length; i++) {
+            var lb = loadbalancers[i];
+            var publicAddress = lb["frontendIPConfigurations"][0]["publicIPAddress"]["id"];
+            for (var j=0; j < lb["inboundNatRules"].length; j++) {
+                var natRule = lb["inboundNatRules"][j];
+                inboundNatRuleMap[natRule["id"]] = {
+                    frontendPort : natRule["frontendPort"],
+                    backendPort : natRule["backendPort"],
+                    publicAddress : publicAddress
+                }
+            }
+        }
+        this.inboundNatRuleMap = inboundNatRuleMap;
+    }
+    
     private InstantiateEnvironment() {
         var resources = this.getResources();
         tl.debug("Got resources..");
@@ -205,104 +225,47 @@ export class RegisterEnvironment {
         return resources;
     }
 
-    private getVMDetails() {
-        var deferred = q.defer();
-        var armClient = new computeManagementClient(this.taskParameters.credentials, this.taskParameters.subscriptionId);
-        armClient.virtualMachines.list(this.taskParameters.resourceGroupName, (error, virtualMachines, request, response) => {
-            if (error){
-                console.log("Error while getting list of Virtual Machines", error);
-                deferred.reject("FailedToFetchVMs");
-            }
-            this.nicIds = [];
-            var tags = {};
-            for (var i = 0; i < virtualMachines.length; i++) {
-                var vm = virtualMachines[i];
-                var nicId = vm["networkProfile"]["networkInterfaces"][0]["id"];
-                this.nicIds.push(nicId);
-                if (vm["tags"] != undefined)
-                    tags[nicId] = vm["tags"];
-            }
-            this.nicIdToTagsMap = tags;
-            deferred.resolve(virtualMachines);            
-        });
-        return deferred.promise;
+    private parseVMDetails(virtualMachines) {
+        this.nicIds = [];
+        var tags = {};
+        for (var i = 0; i < virtualMachines.length; i++) {
+            var vm = virtualMachines[i];
+            var nicId = vm["networkProfile"]["networkInterfaces"][0]["id"];
+            this.nicIds.push(nicId);
+            if (vm["tags"] != undefined)
+                tags[nicId] = vm["tags"];
+        }
+        this.nicIdToTagsMap = tags;
     }
 
-    private getNetworkInterfaceDetails() {
-        var deferred = q.defer();
-        var armClient = new networkManagementClient(this.taskParameters.credentials, this.taskParameters.subscriptionId);
-        armClient.networkInterfaces.list(this.taskParameters.resourceGroupName, (error, networkInterfaces, request, response) => {
-            if (error){
-                console.log("Error while getting list of Network Interfaces", error);
-                deferred.reject("FailedToFetchNetworkInterfaces");
+    private parseNetworkInterfaceDetails(networkInterfaces) {
+        var interfaces = {};
+        for (var i = 0; i < networkInterfaces.length; i++) {
+            var networkInterface = networkInterfaces[i];
+            var nicId = networkInterface["id"];
+            var ipConfig = networkInterface["ipConfigurations"][0];
+            if (ipConfig["publicIPAddress"]){
+                interfaces[nicId] = { publicAddress: ipConfig["publicIPAddress"]["id"] };
+            } else if (ipConfig["loadBalancerInboundNatRules"]) {
+                interfaces[nicId] ={ inboundNatRule: ipConfig["loadBalancerInboundNatRules"] };
             }
-            var interfaces = {};
-            for (var i = 0; i < networkInterfaces.length; i++) {
-                var networkInterface = networkInterfaces[i];
-                var nicId = networkInterface["id"];
-                var ipConfig = networkInterface["ipConfigurations"][0];
-                if (ipConfig["publicIPAddress"]){
-                    interfaces[nicId] = { publicAddress: ipConfig["publicIPAddress"]["id"] };
-                } else if (ipConfig["loadBalancerInboundNatRules"]) {
-                    interfaces[nicId] ={ inboundNatRule: ipConfig["loadBalancerInboundNatRules"] };
-                }
-            }
-            this.publicAddressToNicIdMap = interfaces;
-            deferred.resolve(networkInterfaces);  
-        });
-        return deferred.promise;
+        }
+        this.publicAddressToNicIdMap = interfaces;
     }
 
-    private getPublicIPAddresses() {
-        var deferred = q.defer();
-        var armClient = new networkManagementClient(this.taskParameters.credentials, this.taskParameters.subscriptionId);
-        armClient.publicIPAddresses.list(this.taskParameters.resourceGroupName, (error, publicAddresses, request, response) => {
-            if (error){
-                console.log("Error while getting list of Public Addresses", error);
-                deferred.reject("FailedToFetchPublicAddresses");
+    private parsePublicIPDetails(publicAddresses) {
+        var fqdns = {}
+        for (var i = 0; i < publicAddresses.length; i++) {
+            var publicAddress = publicAddresses[i];
+            var publicAddressId = publicAddress["id"];
+            if (publicAddress["dnsSettings"]) {
+                fqdns[publicAddressId] = publicAddress["dnsSettings"]["fqdn"];
             }
-            var fqdns = {}
-            for (var i = 0; i < publicAddresses.length; i++) {
-                var publicAddress = publicAddresses[i];
-                var publicAddressId = publicAddress["id"];
-                if (publicAddress["dnsSettings"]) {
-                    fqdns[publicAddressId] = publicAddress["dnsSettings"]["fqdn"];
-                }
-                else {
-                    fqdns[publicAddressId] = publicAddress["ipAddress"];
-                }
+            else {
+                fqdns[publicAddressId] = publicAddress["ipAddress"];
             }
-            this.publicAddressToFqdnMap = fqdns;
-            deferred.resolve(publicAddresses);
-        });
-        return deferred.promise;
-    }
-    
-    private getLoadBalancers() {
-        var deferred = q.defer();
-        var armClient = new networkManagementClient(this.taskParameters.credentials, this.taskParameters.subscriptionId);
-        armClient.loadBalancers.list(this.taskParameters.resourceGroupName, (error, loadbalancers, request, response) => {
-            if (error){
-                console.log("Error while getting list of Load Balancers", error);
-                deferred.reject("FailedToFetchLoadBalancers");
-            }
-            var inboundNatRuleMap = {};
-            for (var i=0; i < loadbalancers.length; i++) {
-                var lb = loadbalancers[i];
-                var publicAddress = lb["frontendIPConfigurations"][0]["publicIPAddress"]["id"];
-                for (var j=0; j < lb["inboundNatRules"].length; j++) {
-                    var natRule = lb["inboundNatRules"][j];
-                    inboundNatRuleMap[natRule["id"]] = {
-                        frontendPort : natRule["frontendPort"],
-                        backendPort : natRule["backendPort"],
-                        publicAddress : publicAddress
-                    }
-                }
-            }
-            this.inboundNatRuleMap = inboundNatRuleMap;
-            deferred.resolve(loadbalancers);
-        });
-        return deferred.promise;
+        }
+        this.publicAddressToFqdnMap = fqdns;
     }
 }
 
