@@ -1,0 +1,12 @@
+{
+    "messages": {
+        "DefaultPortWarning": "The port '{0}' specified on your connection endpoint does not match the default ClientConnectionEndpoint of '19000'. This might have caused cluster communication failure.",
+        "ConnectedToCluster": "Successfully connected to cluster.",
+        "AadAuthority": "AAD Authority: {0}",
+        "ClusterAppId": "Cluster Application ID: {0}",
+        "ClientAppId": "Client Application ID: {0}",
+        "ErrorOnCertificateImport": "An error occurred attempting to import the certificate. Ensure that your service endpoint is configured properly with a correct certificate value and, if the certificate is password-protected, a valid password. Error message: {0}",
+        "ErrorOnAcquireToken": "An error occurred attempting to acquire an Azure Active Directory token. Ensure that your service endpoint is configured properly with valid credentials. Error message: {0}",
+        "ImportedCertificate": "Imported cluster client certificate with thumbprint '{0}'."
+    }
+}

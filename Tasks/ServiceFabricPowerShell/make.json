@@ -1,0 +1,8 @@
+{
+    "common": [
+        {
+            "module": "../Common/ServiceFabricHelpers",
+            "type": "ps"
+        }
+    ]
+}
