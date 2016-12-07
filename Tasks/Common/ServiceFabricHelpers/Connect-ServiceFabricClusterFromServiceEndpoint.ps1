@@ -75,7 +75,7 @@ function Add-Certificate
 
         if ($ConnectedServiceEndpoint.Auth.Parameters.CertificatePassword)
         {
-            $certificate.Import($bytes, $ConnectedServiceEndpoint.Auth.Parameters.CertificatePassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+            $certificate.Import($bytes, $ConnectedServiceEndpoint.Auth.Parameters.CertificatePassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet)
         }
         else
         {
@@ -147,7 +147,7 @@ function Connect-ServiceFabricClusterFromServiceEndpoint {
                 $ClusterConnectionParameters["SecurityToken"] = $securityToken
                 $ClusterConnectionParameters["WarningAction"] = "SilentlyContinue"
             }
-            elseif ($connectedServiceEndpoint.Auth.Scheme -eq "Certificate")
+            elseif ($ClusterEndpoint.Auth.Scheme -eq "Certificate")
             {
                 Add-Certificate -ClusterConnectionParameters $ClusterConnectionParameters -ConnectedServiceEndpoint $ClusterEndpoint
                 $ClusterConnectionParameters["X509Credential"] = $true
